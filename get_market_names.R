@@ -1,20 +1,44 @@
-# Load libraries, read in previous market data
-library(tidyverse)
-out_fn <- 'markets.csv'
-prev_markets <- data.table::fread(out_fn)
-biden_marks <- prev_markets[grepl('Biden.*538', prev_markets$name),]
+# get_market_names.R ------------------------------------------------------
+# Goal: to identify the index numbers and names of previous PredictIt markets
+#       and to save results to file for use in other scraping activities
 
-# Get a list of numbers to search
-nsamp <- 50
-nums <- 7700:7900
-new_nums <- nums[!(nums %in% prev_markets$x)]
-nums <- sample(new_nums, min(length(new_nums), nsamp), replace = FALSE)
+# Load libraries
+library(tidyverse)
+
+# Set search parameters
+nsamp <- 30
+max_try <- 5
+ids <- 7700:7900
+
+# Read in list of previous markets
+mark_fn <- './data/markets.Rds'
+marks <- readRDS(mark_fn)
+
+# Initialize a dataframe of numbers not currently in the market search data frame
+new_ids <- ids[!(ids %in% marks$id)]
+if(length(new_ids) > 0){
+
+  # Add new IDs to the main dataframe.
+  new_ids <- data.frame(id = new_ids, market_name = NA_character_, ntry = 0)
+
+  # Combine current market and new ids
+  new_marks <- marks %>%
+    bind_rows(new_ids) %>%
+    arrange(id)
+} else{
+  new_marks <- marks %>% arrange(id)
+}
+
+
+# These are new markets to search
+to_search <- filter(new_marks, is.na(market_name) & ntry < max_try)
+search_nums <- sample(to_search$id, min(length(to_search$id), nsamp), replace = FALSE)
 
 # Function to get market names
 get_names_fun <- function(x){
   try <- tryCatch(jsonlite::fromJSON(paste0('https://www.predictit.org/api/marketdata/markets/', x))$shortName, error = function(e) NULL)
   if(identical(try, NULL)){
-    Sys.sleep(30)
+    Sys.sleep(5)
     return(cbind(x, NA_character_))
   } else{
     return(cbind(x, try))
@@ -24,12 +48,16 @@ get_names_fun <- function(x){
 
 # Get as many names as we can, save to file
 # It will eventually time out and stop returning results
-# I've lazily handled this by babysitting the function and running the script many times
-names_all <- lapply(nums, function(x) tryCatch(get_names_fun(x), error = function(e) NULL))
-names_keep <- data.frame(do.call(rbind, names_all)) %>%
-  rename(name = 2) %>%
-  filter(!is.na(name))
+names_all <- lapply(search_nums, function(x) tryCatch(get_names_fun(x), error = function(e) NULL))
+names_new <- data.frame(do.call(rbind, names_all)) %>%
+  rename(id = 1, market_name = 2) %>%
+  mutate(ntry = 1,
+         id = as.integer(id))
+
+out <- new_marks %>%
+  anti_join(names_new, by = c('id')) %>%
+  bind_rows(names_new)
 
 # Write to file
-data.table::fwrite(names_keep, out_fn, append = TRUE)
+saveRDS(out, mark_fn)
 
