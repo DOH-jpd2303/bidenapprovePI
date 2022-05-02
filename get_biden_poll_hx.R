@@ -1,16 +1,19 @@
+# get_biden_poll_hx.R ------------------------------------------------------
+# Goal: to get the market prices for each day for the Biden polls
+
 # Load libraries, read in previous market data
 library(tidyverse)
 library(data.table)
 
 # Filenames
 prices_fn <- './data/daily_approval_prices.Rds'
-markets_fn <- './data/markets.csv'
+markets_fn <- './data/markets.Rds'
 
 # Read in previous historical data prices
 prices_start <- readRDS(prices_fn)
 
 # Get a list of markets
-new_markets <- data.table::fread(markets_fn) %>%
+new_markets <- readRDS(markets_fn) %>%
   filter(grepl("Biden's 538", market_name) & !id %in% prices_start$marketId)
 
 # Function to get daily price index

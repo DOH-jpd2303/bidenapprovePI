@@ -13,34 +13,30 @@
 #' the estimated probability of a value in that range.
 #'
 #' @export
-predict_polling_brackets <- function(poll_dates, poll_values, train_end_date, target_date, range_mins, range_maxes){
+
+predict_polling_bracket <- function(poll_dates, poll_values, train_end_date, target_date, range_mins, range_maxes){
+  h <- as.numeric(target_date - train_end_date)
+
   # Subset to dates before the training end date
-  poll_dates2 <- poll_dates[poll_dates < train_end_date]
-  poll_values2 <- poll_values[poll_dates < train_end_date]
+  poll_dates2 <- as.numeric(poll_dates[poll_dates < train_end_date])
+  poll_values2 <- as.numeric(poll_values[poll_dates < train_end_date])
+  target_date2 <- as.numeric(target_date)
 
-  # Get first/last date in range
-  min_date <- min(poll_dates2)
-  max_date <- max(poll_dates2)
-
-  # Create a sequence of dates from the end of training to target
-  pred_dates <- seq.Date(from = (max_date + 1), to = target_date, by = 'day')
-  h <- length(pred_dates)
-
-  # Create a time series from the testing set, fit an ARIMA model
-  ts <- as.ts(poll_values2, start = min(poll_dates2), end = max(poll_dates2), frequency = 1)
-  fit <- forecast::Arima(ts, order = c(2,1,1), include.drift = FALSE, include.mean = TRUE)
-
-  # Forecast to the target date, extract mean and err
-  fc <- forecast::forecast(fit, h = h, level = 95, bootstrap = TRUE)
-  m <- fc$mean
-  s <- ((fc$upper - fc$lower)/1.96/2)
+  # Fit a splined forecast, get the implied sigma
+  fit <- forecast::splinef(poll_values2, h, level = 95)
+  m <- fit$mean[h]
+  s <- (fit$upper[h] - m)/1.96
 
   # Get the probability that the predicted value lies within each range of values
+  # Uses the implied sigma and forecasted value
   new_vals <- c(0, lag(range_maxes)[-1])
-  pnorms_low <- as.numeric(lapply(new_vals, pnorm, mean = m[h], sd = s[h]))
-  pnorms_high <- as.numeric(lapply(range_maxes, pnorm, mean = m[h], sd = s[h]))
+  pnorms_low <- as.numeric(lapply(new_vals, pnorm, mean = m, sd = s))
+  pnorms_high <- as.numeric(lapply(range_maxes, pnorm, mean = m, sd = s))
   prob <- pnorms_high - pnorms_low
-  return(prob)
+
+  # Return the point forecast, sd, and probabilities
+  out <- data.frame(date = train_end_date, target_date, range_mins, range_maxes, m, s, probs = prob)
+  return(out)
 }
 
 
@@ -57,6 +53,6 @@ extract_num_range <- function(x){
   val_high <- dplyr::case_when(grepl('lower', x) ~
                                  as.numeric(stringr::str_extract(x, ".*(?=\\%)")),
                                grepl('higher', x) ~ 100,
-                               TRUE ~ as.numeric(stringr::str_extract(x, "(?<= to ).*(?=\\%)")))
+                               TRUE ~ as.numeric(stringr::str_extract(x, "(?<= (to|or) ).*(?=\\%)")))
   return(list(as.numeric(val_low)/100, as.numeric(val_high)/100))
 }
