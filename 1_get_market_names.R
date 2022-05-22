@@ -4,40 +4,19 @@
 
 # Load libraries
 library(tidyverse)
+library(config)
 
-# Read in list of previous markets
-mark_fn <- './data/markets.Rds'
-marks <- readRDS(mark_fn)
+# Pull the configuration file that includes all file paths and other key vars
+cfig_fn <- 'C:/Users/jondo/OneDrive/Documents/Coding/config/pi_config.yml'
+config <- config::get(file = cfig_fn)
 
-# Set number of ids to try each run, max number of attmepts per id, and
-# a range of IDs to add
-nsamp <- 30
-max_try <- 3
-ids <- min(marks$id):max(marks$id)
-sleep_time <- 2
+market_id <- '7905'
 
-# Initialize a dataframe of numbers not currently in the market search data frame
-new_ids <- ids[!(ids %in% marks$id)]
-if(length(new_ids) > 0){
-
-  # Add new IDs to the main dataframe.
-  new_ids <- data.frame(id = new_ids, market_name = NA_character_, ntry = 0)
-
-  # Combine current market and new ids
-  new_marks <- marks %>%
-    bind_rows(new_ids) %>%
-    arrange(id)
-} else{
-  new_marks <- marks %>% arrange(id)
-}
-
-# These are new markets to search
-to_search <- filter(new_marks, is.na(market_name) & ntry < max_try)
-search_nums <- sample(to_search$id, min(length(to_search$id), nsamp), replace = FALSE)
-
+hm <- jsonlite::fromJSON(paste0("https://www.predictit.org/api/marketdata/markets/", market_id))
 # Pulls market names from PredictIt API
 get_names_fun <- function(x){
-  try <- tryCatch(jsonlite::fromJSON(paste0('https://www.predictit.org/api/marketdata/markets/', x))$shortName, error = function(e) NULL)
+  try <- tryCatch(jsonlite::fromJSON(paste0(config$pi_market_url, x))$shortName,
+                  error = function(e) NULL)
   Sys.sleep(sleep_time)
   if(identical(try, NULL)){
     return(cbind(x, NA_character_))
@@ -53,7 +32,8 @@ names_new <- data.frame(do.call(rbind, names_all)) %>%
   rename(id = 1, market_name = 2) %>%
   mutate(id = as.integer(id)) %>%
   inner_join(new_marks %>% select(-market_name), by = 'id') %>%
-  mutate(ntry = ntry + 1)
+  mutate(ntry = ntry + 1) %>%
+  filter(id <= 7894)
 
 # Get some stats for curiosity's sake
 table(is.na(names_new$market_name))
@@ -65,7 +45,7 @@ out <- new_marks %>%
   bind_rows(names_new)
 
 # Write to file
-saveRDS(out, mark_fn)
+saveRDS(out, config$markets_fn)
 
 # Overall stats
 table(is.na(out$market_name))
